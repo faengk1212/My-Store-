@@ -24,15 +24,25 @@
         <!-- Products Grid -->
         <div id="products-grid" class="grid grid-cols-2 gap-3"></div>
 
-        <!-- Admin Control Panel (แสดงเฉพาะ Admin) -->
+        <!-- Admin Control Panel -->
         <div id="admin-panel" class="hidden mt-8 bg-white p-4 rounded-xl shadow-sm border border-red-200">
             <h2 class="font-bold text-red-600 mb-3 text-sm">จัดการระบบ (สำหรับแอดมิน)</h2>
             
-            <!-- Form เพิ่มสินค้า -->
-            <form id="add-product-form" class="space-y-3 mb-4">
+            <!-- Form 1: เพิ่มหมวดหมู่ -->
+            <form id="add-category-form" class="flex gap-2 mb-4">
+                <input type="text" id="c-name" placeholder="ชื่อหมวดหมู่ใหม่" required class="flex-1 text-sm border p-2 rounded">
+                <button type="submit" class="bg-gray-800 text-white text-xs px-3 py-2 rounded font-bold whitespace-nowrap">+ หมวดหมู่</button>
+            </form>
+
+            <hr class="my-3 border-gray-200">
+
+            <!-- Form 2: เพิ่มสินค้า -->
+            <form id="add-product-form" class="space-y-3">
                 <input type="text" id="p-name" placeholder="ชื่อสินค้า" required class="w-full text-sm border p-2 rounded">
                 <input type="number" id="p-price" placeholder="ราคา" required class="w-full text-sm border p-2 rounded">
-                <select id="p-category" class="w-full text-sm border p-2 rounded"></select>
+                <select id="p-category" required class="w-full text-sm border p-2 rounded">
+                    <option value="">-- เลือกหมวดหมู่ --</option>
+                </select>
                 <input type="file" id="p-image" accept="image/*" class="w-full text-xs text-gray-500">
                 <button type="submit" class="w-full bg-red-500 text-white text-sm py-2 rounded font-bold">เพิ่มสินค้า</button>
             </form>
@@ -74,7 +84,9 @@
         }
 
         async function loadCategories() {
-            categories = await fetchAPI('/api/categories');
+            const res = await fetchAPI('/api/categories');
+            categories = Array.isArray(res) ? res : [];
+            
             const container = document.getElementById('categories-container');
             const select = document.getElementById('p-category');
             
@@ -85,11 +97,13 @@
                 </button>
             `).join('');
 
-            select.innerHTML = categories.map(c => `<option value="${c}">${c}</option>`).join('');
+            select.innerHTML = '<option value="">-- เลือกหมวดหมู่ --</option>' + 
+                categories.map(c => `<option value="${c}">${c}</option>`).join('');
         }
 
         async function loadProducts() {
-            products = await fetchAPI('/api/products');
+            const res = await fetchAPI('/api/products');
+            products = Array.isArray(res) ? res : [];
             renderProducts();
         }
 
@@ -104,6 +118,11 @@
             const filtered = selectedCategory === 'ทั้งหมด' 
                 ? products 
                 : products.filter(p => p.category === selectedCategory);
+
+            if (filtered.length === 0) {
+                grid.innerHTML = '<p class="col-span-2 text-center text-xs text-gray-400 py-6">ยังไม่มีสินค้าในหมวดหมู่นี้</p>';
+                return;
+            }
 
             grid.innerHTML = filtered.map(p => `
                 <div class="bg-white rounded-xl overflow-hidden shadow-sm flex flex-col justify-between">
@@ -123,6 +142,22 @@
             loadProducts();
         }
 
+        // เพิ่มหมวดหมู่
+        document.getElementById('add-category-form').onsubmit = async (e) => {
+            e.preventDefault();
+            const nameInput = document.getElementById('c-name');
+            const res = await fetchAPI('/api/categories', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: nameInput.value })
+            });
+
+            if (res.error) alert(res.error);
+            nameInput.value = '';
+            await loadCategories();
+        };
+
+        // เพิ่มสินค้า
         document.getElementById('add-product-form').onsubmit = async (e) => {
             e.preventDefault();
             const formData = new FormData();
@@ -139,11 +174,11 @@
             });
 
             e.target.reset();
-            loadProducts();
+            await loadProducts();
         };
 
         init();
     </script>
 </body>
-  </html>
-  
+                </html>
+
