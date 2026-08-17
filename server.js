@@ -101,6 +101,22 @@ app.post('/api/categories', authMiddleware, adminOnly, async (req, res) => {
     }
 });
 
+app.post('/api/categories', authMiddleware, adminOnly, async (req, res) => {
+    try {
+        const { name } = req.body;
+        if (!name) return res.status(400).json({ error: "กรุณากรอกชื่อหมวดหมู่" });
+        
+        await Category.create({ name });
+        const categories = await Category.find();
+        res.json({ success: true, categories: categories.map(c => c.name) });
+    } catch (err) {
+        console.error("Add Category Error:", err);
+        // ส่งข้อความ Error จากระบบกลับไปแสดงบนหน้าจอ
+        res.status(500).json({ error: `ไม่สามารถเพิ่มได้: ${err.message}` });
+    }
+});
+                                                           
+
 app.delete('/api/categories/:name', authMiddleware, adminOnly, async (req, res) => {
     const total = await Category.countDocuments();
     if (total <= 1) return res.status(400).json({ error: "ต้องมีอย่างน้อย 1 หมวดหมู่" });
