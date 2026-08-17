@@ -61,16 +61,33 @@
         const initData = tg.initData || '';
 
         async function fetchAPI(endpoint, options = {}) {
-            options.headers = {
-                ...options.headers,
-                'x-telegram-init-data': initData
-            };
-            const res = await fetch(endpoint, options);
-            return res.json();
+            try {
+                const headers = { ...options.headers };
+                if (initData) headers['x-telegram-init-data'] = initData;
+
+                if (options.body && !(options.body instanceof FormData) && !headers['Content-Type']) {
+                    headers['Content-Type'] = 'application/json';
+                }
+                options.headers = headers;
+
+                const res = await fetch(endpoint, options);
+                const data = await res.json().catch(() => ({ error: 'ไม่สามารถอ่านข้อมูลตอบรับจาก Server ได้' }));
+
+                if (!res.ok) {
+                    alert('ข้อผิดพลาดจากเซิร์ฟเวอร์ (' + res.status + '): ' + (data.error || 'ไม่ทราบสาเหตุ'));
+                    return null;
+                }
+                return data;
+            } catch (err) {
+                alert('การเชื่อมต่อล้มเหลว: ' + err.message);
+                return null;
+            }
         }
 
         async function init() {
             const me = await fetchAPI('/api/me');
+            if (!me) return;
+
             document.getElementById('user-info').innerText = `สวัสดี, ${me.user.first_name || 'ลูกค้า'}`;
             isAdmin = me.isAdmin;
 
@@ -138,23 +155,31 @@
 
         async function deleteProduct(id) {
             if (!confirm('ยืนยันการลบสินค้านี้?')) return;
-            await fetchAPI(`/api/products/${id}`, { method: 'DELETE' });
-            loadProducts();
+            const res = await fetchAPI(`/api/products/${id}`, { method: 'DELETE' });
+            if (res) loadProducts();
         }
 
         // เพิ่มหมวดหมู่
         document.getElementById('add-category-form').onsubmit = async (e) => {
             e.preventDefault();
             const nameInput = document.getElementById('c-name');
+            const catName = nameInput.value.trim();
+
+            if (!catName) {
+                alert('กรุณากรอกชื่อหมวดหมู่');
+                return;
+            }
+
             const res = await fetchAPI('/api/categories', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name: nameInput.value })
+                body: JSON.stringify({ name: catName })
             });
 
-            if (res.error) alert(res.error);
-            nameInput.value = '';
-            await loadCategories();
+            if (res && res.success) {
+                alert('เพิ่มหมวดหมู่สำเร็จ!');
+                nameInput.value = '';
+                await loadCategories();
+            }
         };
 
         // เพิ่มสินค้า
@@ -167,18 +192,19 @@
             const imageFile = document.getElementById('p-image').files[0];
             if (imageFile) formData.append('image', imageFile);
 
-            await fetch('/api/products', {
+            const res = await fetchAPI('/api/products', {
                 method: 'POST',
-                headers: { 'x-telegram-init-data': initData },
                 body: formData
             });
 
-            e.target.reset();
-            await loadProducts();
+            if (res && res.success) {
+                alert('เพิ่มสินค้าสำเร็จ!');
+                e.target.reset();
+                await loadProducts();
+            }
         };
 
         init();
     </script>
 </body>
-                </html>
-
+</html>
