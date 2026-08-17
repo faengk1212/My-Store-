@@ -10,47 +10,56 @@ const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 3000;
 const BOT_TOKEN = process.env.BOT_TOKEN || '';
-const ADMIN_USER_ID = Number(process.env.ADMIN_USER_ID) || 5055497784;
+const ADMIN_USER_ID = Number(process.env.ADMIN_USER_ID) || 0;
 
+// Middleware
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Database Connection
-if (process.env.MONGODB_URI) {
-    mongoose.connect(process.env.MONGODB_URI)
-        .then(() => console.log('MongoDB Connected Successfully'))
-        .catch(err => console.error('MongoDB Connection Error:', err));
+// Safe MongoDB Connection
+const MONGODB_URI = process.env.MONGODB_URI;
+if (MONGODB_URI) {
+    mongoose.connect(MONGODB_URI)
+        .then(() => console.log('✅ MongoDB Connected Successfully'))
+        .catch(err => console.error('❌ MongoDB Connection Error:', err.message));
+} else {
+    console.warn('⚠️ MONGODB_URI is not configured in Environment Variables');
 }
 
-// Mongoose Models
-const Category = mongoose.model('Category', new mongoose.Schema({
+// Schemas & Models
+const Category = mongoose.models.Category || mongoose.model('Category', new mongoose.Schema({
     name: { type: String, required: true, unique: true }
 }));
 
-const Product = mongoose.model('Product', new mongoose.Schema({
+const Product = mongoose.models.Product || mongoose.model('Product', new mongoose.Schema({
     name: { type: String, required: true },
     price: { type: Number, required: true },
     category: { type: String, required: true },
     image: { type: String, default: 'https://via.placeholder.com/300' }
 }));
 
-// Cloudinary Config
+// Cloudinary Setup
 cloudinary.config({
-    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-    api_key: process.env.CLOUDINARY_API_KEY,
-    api_secret: process.env.CLOUDINARY_API_SECRET
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME || '',
+    api_key: process.env.CLOUDINARY_API_KEY || '',
+    api_secret: process.env.CLOUDINARY_API_SECRET || ''
+});
+
+const storage = new CloudinaryStorage({
+    cloudinary: cloudinary,
+    params: {
+        folder: 'bkkpod_products',
+        allowed_formats: ['jpg', 'png', 'jpeg', 'webp']
+    }
 });
 
 const upload = multer({
-    storage: new CloudinaryStorage({
-        cloudinary: cloudinary,
-        params: { folder: 'bkkpod_products', allowed_formats: ['jpg', 'png', 'jpeg', 'webp'] }
-    }),
+    storage: storage,
     limits: { fileSize: 5 * 1024 * 1024 }
 });
 
-// Auth Middleware
+// Auth Verification
 function verifyTelegramData(telegramInitData) {
     if (!telegramInitData) return null;
     try {
@@ -83,21 +92,15 @@ function adminOnly(req, res, next) {
     next();
 }
 
-// API Routes
+// Routes
 app.get('/api/me', authMiddleware, (req, res) => res.json({ user: req.user, isAdmin: req.isAdmin }));
 
 app.get('/api/categories', async (req, res) => {
-    const categories = await Category.find();
-    res.json(categories.map(c => c.name));
-});
-
-app.post('/api/categories', authMiddleware, adminOnly, async (req, res) => {
     try {
-        await Category.create({ name: req.body.name });
         const categories = await Category.find();
-        res.json({ success: true, categories: categories.map(c => c.name) });
+        res.json(categories.map(c => c.name));
     } catch (err) {
-        res.status(400).json({ error: "หมวดหมู่นี้มีอยู่แล้ว" });
+        res.status(500).json({ error: "ไม่สามารถดึงข้อมูลหมวดหมู่ได้: " + err.message });
     }
 });
 
@@ -105,51 +108,65 @@ app.post('/api/categories', authMiddleware, adminOnly, async (req, res) => {
     try {
         const { name } = req.body;
         if (!name) return res.status(400).json({ error: "กรุณากรอกชื่อหมวดหมู่" });
-        
         await Category.create({ name });
         const categories = await Category.find();
         res.json({ success: true, categories: categories.map(c => c.name) });
     } catch (err) {
-        console.error("Add Category Error:", err);
-        // ส่งข้อความ Error จากระบบกลับไปแสดงบนหน้าจอ
-        res.status(500).json({ error: `ไม่สามารถเพิ่มได้: ${err.message}` });
+        res.status(500).json({ error: "เพิ่มหมวดหมู่ไม่สำเร็จ: " + err.message });
     }
 });
-                                                           
 
 app.delete('/api/categories/:name', authMiddleware, adminOnly, async (req, res) => {
-    const total = await Category.countDocuments();
-    if (total <= 1) return res.status(400).json({ error: "ต้องมีอย่างน้อย 1 หมวดหมู่" });
-    
-    await Category.deleteOne({ name: req.params.name });
-    const fallback = await Category.findOne();
-    if (fallback) await Product.updateMany({ category: req.params.name }, { category: fallback.name });
-    
-    const categories = await Category.find();
-    res.json({ success: true, categories: categories.map(c => c.name) });
+    try {
+        const total = await Category.countDocuments();
+        if (total <= 1) return res.status(400).json({ error: "ต้องมีอย่างน้อย 1 หมวดหมู่" });
+        await Category.deleteOne({ name: req.params.name });
+        const fallback = await Category.findOne();
+        if (fallback) await Product.updateMany({ category: req.params.name }, { category: fallback.name });
+        const categories = await Category.find();
+        res.json({ success: true, categories: categories.map(c => c.name) });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 app.get('/api/products', async (req, res) => {
-    const products = await Product.find();
-    res.json(products.map(p => ({ id: p._id, name: p.name, price: p.price, category: p.category, image: p.image })));
+    try {
+        const products = await Product.find();
+        res.json(products.map(p => ({ id: p._id, name: p.name, price: p.price, category: p.category, image: p.image })));
+    } catch (err) {
+        res.status(500).json({ error: "ไม่สามารถดึงข้อมูลสินค้าได้: " + err.message });
+    }
 });
 
 app.post('/api/products', authMiddleware, adminOnly, upload.single('image'), async (req, res) => {
-    const { name, price, category } = req.body;
-    const fallbackCat = await Category.findOne();
-    const catToUse = category || (fallbackCat ? fallbackCat.name : "General");
-    const imageUrl = req.file ? req.file.path : 'https://via.placeholder.com/300';
+    try {
+        const { name, price, category } = req.body;
+        const fallbackCat = await Category.findOne();
+        const catToUse = category || (fallbackCat ? fallbackCat.name : "General");
+        const imageUrl = req.file ? req.file.path : 'https://via.placeholder.com/300';
 
-    const newProduct = await Product.create({ name, price: Number(price), category: catToUse, image: imageUrl });
-    res.json({ success: true, product: { id: newProduct._id, name, price, category: catToUse, image: imageUrl } });
+        const newProduct = await Product.create({ name, price: Number(price), category: catToUse, image: imageUrl });
+        res.json({ success: true, product: { id: newProduct._id, name, price, category: catToUse, image: imageUrl } });
+    } catch (err) {
+        res.status(500).json({ error: "เพิ่มสินค้าไม่สำเร็จ: " + err.message });
+    }
 });
 
 app.delete('/api/products/:id', authMiddleware, adminOnly, async (req, res) => {
-    await Product.findByIdAndDelete(req.params.id);
-    res.json({ success: true });
+    try {
+        await Product.findByIdAndDelete(req.params.id);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
+// SPA Fallback
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
-  
+// Anti-Crash Handler (ดักจับ Error ป้องกันเซิร์ฟเวอร์ดับ)
+process.on('uncaughtException', (err) => console.error('Uncaught Exception:', err));
+process.on('unhandledRejection', (err) => console.error('Unhandled Rejection:', err));
+
+app.listen(PORT, '0.0.0.0', () => console.log(`Server running on port ${PORT}`));
